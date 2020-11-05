@@ -1,7 +1,10 @@
-package com.lennydennis.zerakigoogledrive;
+package com.lennydennis.zerakigoogledrive.ui.fragments.views;
+
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import androidx.lifecycle.ViewModelProvider;
 
 import android.Manifest;
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -10,21 +13,19 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.OpenableColumns;
-import android.util.Log;
-import android.view.View;
-import android.widget.Button;
-import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
+import androidx.fragment.app.Fragment;
+import androidx.navigation.Navigation;
 
-import com.ammarptn.gdriverest.DriveServiceHelper;
-import com.ammarptn.gdriverest.GoogleDriveFileHolder;
+import android.provider.OpenableColumns;
+import android.util.Log;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Toast;
+
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.auth.api.signin.GoogleSignInClient;
@@ -34,42 +35,109 @@ import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.gson.Gson;
 import com.hbisoft.pickit.PickiT;
 import com.hbisoft.pickit.PickiTCallbacks;
-
+import com.lennydennis.zerakigoogledrive.R;
+import com.lennydennis.zerakigoogledrive.databinding.HomeFragmentBinding;
+import com.lennydennis.zerakigoogledrive.drive.DriveServiceHelper;
+import com.lennydennis.zerakigoogledrive.drive.GoogleDriveFileHolder;
+import com.lennydennis.zerakigoogledrive.ui.fragments.viewmodels.HomeFragmentsViewModel;
+import com.lennydennis.zerakigoogledrive.util.PathUtil;
 
 import java.io.File;
 import java.net.URISyntaxException;
+import java.util.List;
 
+import static android.app.Activity.RESULT_OK;
 import static com.ammarptn.gdriverest.DriveServiceHelper.getGoogleDriveService;
 
-public class MainActivity extends AppCompatActivity implements PickiTCallbacks {
+public class HomeFragment extends Fragment implements PickiTCallbacks {
+
     private static final String TAG = "MainActivity";
     private static final int READ_PERMISSION = 0;
     private static final int REQUEST_CODE = 1;
     private static final int REQUEST_CODE_SIGN_IN = 100;
     private static final String FOLDER_ID = "Folder ID";
 
-    Button selectButton, uploadButton;
-    TextView mFileName;
+    PickiT pickiT;
     private GoogleSignInClient mGoogleSignInClient;
     private DriveServiceHelper mDriveServiceHelper;
     private Uri mFileUri;
     private String mFileOriginalName;
     private String mAccountName;
-    PickiT pickiT;
     private String mInternalFilePath;
-    private Intent mResultDataIntent;
     private SharedPreferences mSharedPreferences;
-    private Boolean mCreateFolder;
+
+    private HomeFragmentsViewModel mViewModel;
+    private HomeFragmentBinding mHomeFragmentBinding;
+    private String mFolderName;
+
+    public static HomeFragment newInstance() {
+        return new HomeFragment();
+    }
 
     @Override
-    protected void onStart() {
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
+                             @Nullable Bundle savedInstanceState) {
+        mHomeFragmentBinding = HomeFragmentBinding.inflate(inflater,container,false);
+        pickiT = new PickiT(getContext(), this, requireActivity());
+
+
+        mHomeFragmentBinding.selectFile.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+
+                if (ContextCompat.checkSelfPermission(requireActivity(), Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
+                    selectFile();
+                } else {
+                    ActivityCompat.requestPermissions(requireActivity(), new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, READ_PERMISSION);
+                }
+            }
+        });
+
+        mHomeFragmentBinding.uploadFile.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if (mFileUri != null && mFileOriginalName != null) {
+                    createFolder();
+                } else {
+                    Toast.makeText(requireActivity(), "Select a file", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+
+        mHomeFragmentBinding.viewFiles.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+//                String folderId = mSharedPreferences.getString("Folder Id", "");
+                String folderId = "1U-rGrlZZO1xNGiP77Mc8fNTZ0R1y_Ccj";
+                mFolderName = "Session One";
+                if (folderId != null && mFolderName != null) {
+                    Navigation.findNavController(view).navigate(HomeFragmentDirections.actionHomeFragmentToGdriveDebugViewFragment().setFolderId(folderId).setFolderName(mFolderName));
+                    viewFiles(folderId);
+                } else {
+                    Toast.makeText(getContext(), "Create files", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+
+        return mHomeFragmentBinding.getRoot();
+    }
+
+    @Override
+    public void onActivityCreated(@Nullable Bundle savedInstanceState) {
+        super.onActivityCreated(savedInstanceState);
+        mViewModel = new ViewModelProvider(this).get(HomeFragmentsViewModel.class);
+        // TODO: Use the ViewModel
+    }
+
+    @Override
+    public void onStart() {
         super.onStart();
-        GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(getApplicationContext());
+        GoogleSignInAccount account = GoogleSignIn.getLastSignedInAccount(getContext());
 
         if (account == null) {
             signIn();
         } else {
-            mDriveServiceHelper = new com.ammarptn.gdriverest.DriveServiceHelper(getGoogleDriveService(getApplicationContext(), account, "appName"));
+            mDriveServiceHelper = new DriveServiceHelper(getGoogleDriveService(getContext(), account, "appName"));
             mAccountName = account.getEmail();
         }
     }
@@ -85,7 +153,7 @@ public class MainActivity extends AppCompatActivity implements PickiTCallbacks {
                         .requestScopes(com.google.android.gms.drive.Drive.SCOPE_FILE)
                         .requestEmail()
                         .build();
-        return GoogleSignIn.getClient(getApplicationContext(), signInOptions);
+        return GoogleSignIn.getClient(getContext(), signInOptions);
     }
 
     private void handleSignInResult(Intent result) {
@@ -95,7 +163,7 @@ public class MainActivity extends AppCompatActivity implements PickiTCallbacks {
                     public void onSuccess(GoogleSignInAccount googleSignInAccount) {
                         Log.d(TAG, "Signed in as " + googleSignInAccount.getEmail());
                         mAccountName = googleSignInAccount.getEmail();
-                        mDriveServiceHelper = new DriveServiceHelper(getGoogleDriveService(getApplicationContext(), googleSignInAccount, "appName"));
+                        mDriveServiceHelper = new DriveServiceHelper(getGoogleDriveService(getContext(), googleSignInAccount, "appName"));
                         Log.d(TAG, "handleSignInResult: " + mDriveServiceHelper);
                     }
                 })
@@ -108,47 +176,12 @@ public class MainActivity extends AppCompatActivity implements PickiTCallbacks {
     }
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-
-        pickiT = new PickiT(this, this, this);
-
-        selectButton = findViewById(R.id.select_file);
-        uploadButton = findViewById(R.id.upload_file);
-        mFileName = findViewById(R.id.file_name);
-
-        selectButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-
-                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) {
-                    selectFile();
-                } else {
-                    ActivityCompat.requestPermissions(MainActivity.this, new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, READ_PERMISSION);
-                }
-            }
-        });
-
-        uploadButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                if (mFileUri != null && mFileOriginalName != null) {
-                    createFolder();
-                } else {
-                    Toast.makeText(MainActivity.this, "Select a file", Toast.LENGTH_SHORT).show();
-                }
-            }
-        });
-    }
-
-    @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == READ_PERMISSION && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             selectFile();
         } else {
-            Toast.makeText(this, "Provide permission", Toast.LENGTH_SHORT).show();
+            Toast.makeText(requireActivity(), "Provide permission", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -160,52 +193,53 @@ public class MainActivity extends AppCompatActivity implements PickiTCallbacks {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+    public void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         switch (requestCode) {
             case REQUEST_CODE_SIGN_IN:
-                if (resultCode == Activity.RESULT_OK && data != null) {
+                if (resultCode == RESULT_OK && data != null) {
                     handleSignInResult(data);
                 }
                 break;
             case REQUEST_CODE:
                 if (requestCode == REQUEST_CODE && resultCode == RESULT_OK && data != null) {
-                    mResultDataIntent = data;
+
                     mFileUri = data.getData();
+
                     pickiT.getPath(data.getData(), Build.VERSION.SDK_INT);
 
-                    Cursor returnCursor = getContentResolver().query(mFileUri, null, null, null, null);
+                    Cursor returnCursor = requireActivity().getContentResolver().query(mFileUri, null, null, null, null);
                     int nameIndex = returnCursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
                     returnCursor.moveToFirst();
                     mFileOriginalName = returnCursor.getString(nameIndex);
 
-                    selectButton.setVisibility(View.INVISIBLE);
-                    uploadButton.setVisibility(View.VISIBLE);
-                    mFileName.setText(mFileOriginalName);
+                    mHomeFragmentBinding.selectFile.setVisibility(View.INVISIBLE);
+                    mHomeFragmentBinding.uploadFile.setVisibility(View.VISIBLE);
+                    mHomeFragmentBinding.fileName.setText(mFileOriginalName);
                 } else {
-                    Toast.makeText(this, "Please select a file", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(requireActivity(), "Please select a file", Toast.LENGTH_SHORT).show();
                 }
                 break;
         }
         super.onActivityResult(requestCode, resultCode, data);
     }
 
-    public void createFolder(){
-        String folderName = "Session One";
+    public void createFolder() {
+        mFolderName = "Session One";
         if (mDriveServiceHelper == null) {
             return;
         }
         // you can provide  folder id in case you want to save this file inside some folder.
         // if folder id is null, it will save file to the root
-        mDriveServiceHelper.createFolderIfNotExist(folderName, null)
+        mDriveServiceHelper.createFolderIfNotExist(mFolderName, null)
                 .addOnSuccessListener(new OnSuccessListener<GoogleDriveFileHolder>() {
                     @Override
                     public void onSuccess(GoogleDriveFileHolder googleDriveFileHolder) {
                         Gson gson = new Gson();
                         Log.d(TAG, "onSuccess: " + gson.toJson(googleDriveFileHolder));
 
-                        mSharedPreferences = getSharedPreferences(FOLDER_ID, Context.MODE_PRIVATE);
+                        mSharedPreferences = requireActivity().getSharedPreferences(FOLDER_ID, Context.MODE_PRIVATE);
                         SharedPreferences.Editor editor = mSharedPreferences.edit();
-                        editor.putString("Folder Id",googleDriveFileHolder.getId());
+                        editor.putString("Folder Id", googleDriveFileHolder.getId());
                         editor.apply();
                         uploadTheFile(mFileUri, mFileOriginalName);
 
@@ -221,8 +255,8 @@ public class MainActivity extends AppCompatActivity implements PickiTCallbacks {
 
     public void uploadTheFile(Uri fileUri, String fileName) {
         File file = new File(mInternalFilePath);
-        String mimeType = getContentResolver().getType(fileUri);
-        String folderId = mSharedPreferences.getString("Folder Id","");
+        String mimeType = requireActivity().getContentResolver().getType(fileUri);
+        String folderId = mSharedPreferences.getString("Folder Id", "");
 
         if (mDriveServiceHelper == null) {
             return;
@@ -233,11 +267,28 @@ public class MainActivity extends AppCompatActivity implements PickiTCallbacks {
                     @Override
                     public void onSuccess(GoogleDriveFileHolder googleDriveFileHolder) {
                         Gson gson = new Gson();
-                        Toast.makeText(MainActivity.this, mFileOriginalName+" uploaded successfully", Toast.LENGTH_SHORT).show();
-                        selectButton.setVisibility(View.VISIBLE);
-                        uploadButton.setVisibility(View.INVISIBLE);
+                        Toast.makeText(requireActivity(), mFileOriginalName + " uploaded successfully", Toast.LENGTH_SHORT).show();
+                        mHomeFragmentBinding.selectFile.setVisibility(View.VISIBLE);
+                        mHomeFragmentBinding.uploadFile.setVisibility(View.INVISIBLE);
                         Log.d(TAG, "onSuccess: " + gson.toJson(googleDriveFileHolder));
-                        mFileName.setText("File name");
+                        mHomeFragmentBinding.fileName.setText("File name");
+                    }
+                })
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(@NonNull Exception e) {
+                        Log.d(TAG, "onFailure: " + e.getMessage());
+                    }
+                });
+    }
+
+    private void viewFiles(String folderId) {
+        mDriveServiceHelper.queryFiles(folderId)
+                .addOnSuccessListener(new OnSuccessListener<List<GoogleDriveFileHolder>>() {
+                    @Override
+                    public void onSuccess(List<GoogleDriveFileHolder> googleDriveFileHolders) {
+                        Gson gson = new Gson();
+                        Log.d(TAG, "onSuccess: " + gson.toJson(googleDriveFileHolders));
                     }
                 })
                 .addOnFailureListener(new OnFailureListener() {
@@ -269,7 +320,7 @@ public class MainActivity extends AppCompatActivity implements PickiTCallbacks {
             mInternalFilePath = path;
         } else {
             try {
-                mInternalFilePath = PathUtil.INSTANCE.getPath(getApplicationContext(),mFileUri);
+                mInternalFilePath = PathUtil.getPath(getContext(), mFileUri);
             } catch (URISyntaxException e) {
                 e.printStackTrace();
             }
